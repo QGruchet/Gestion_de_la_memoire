@@ -138,6 +138,8 @@ void affiche_adresse(int* adresse){
 }
 
 /****************CREATION DES THREADS****************/
+
+//PERE
 void create_threads(MEMOIRE_CONFIG m_config){
 	pthread_t tid[m_config.nombre_threads];
 	barriere_t bar[m_config.nombre_threads];
@@ -160,6 +162,7 @@ void create_threads(MEMOIRE_CONFIG m_config){
 	printf("\n");
 }
 
+//FILS
 void * thread_fils(void * arg){
 	barriere_t *bar = (barriere_t *)arg;
 	
