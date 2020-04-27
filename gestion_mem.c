@@ -112,6 +112,11 @@ int get_adr_phy(MEMOIRE_CONFIG m_config){
 	return adr_phy;
 }
 
+/******************LIBERATION MEMOIRE*****************/
+void free_type(TYPE_MEMOIRE type){
+	free(type.memoire_lente);
+	free(type.memoire_rapide);
+}
 
 /************PROGRAMME PRINCIPALE***************/
 int main(void){
@@ -123,6 +128,7 @@ int main(void){
 	adr_phy = get_adr_phy(m_config);
 	printf("adr_phy : 0 -> %d\n", adr_phy);
 	affiche_type(type);
+	free_type(type);
 	
 	return 0;
 }
