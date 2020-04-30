@@ -6,12 +6,13 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <fcntl.h>
+#include <errno.h>
 #include "se_fichier.c"
 
 void * thread_fils(void * arg);
-void create_tube(char* path);
-void write_tube(void* message, int fd);
-void read_tube(void* message, int fd);
+int lecture_tube(char* nom_tube);
+void ecriture_tube(char* nom_tube, int num_send);
+int LRU();
 
 /*******************CONTIENT LES INFOS DU FICHIER .CFG****************/
 typedef struct {
@@ -95,8 +96,8 @@ TYPE_MEMOIRE _init_type_(MEMOIRE_CONFIG m_config){
 }
 
 
-/*************AFFICHAGE DU FICHIER********************/
-void affiche_memConfig(MEMOIRE_CONFIG m_config){
+/*************AFFICHAGE DE LA STRUCT MEMOIRE_CONFIG********************/
+void print_memConfig(MEMOIRE_CONFIG m_config){
 	printf("  >> Nombres de frames : %d\n", m_config.nombre_frames);
 	printf("  >> Taille d'une page : %d\n", m_config.taille_page);
 	printf("  >> Nombres de pages : %d\n", m_config.nombre_page);
@@ -105,7 +106,7 @@ void affiche_memConfig(MEMOIRE_CONFIG m_config){
 }
 
 /**************AFFICHAGE DE LA STRUCT TYPE_MEMOIRE*****************/
-void affiche_type(TYPE_MEMOIRE type, MEMOIRE_CONFIG m_config){
+void print_type(TYPE_MEMOIRE type, MEMOIRE_CONFIG m_config){
 
 	printf("(TEST)memoire_rapide : \n");
 	for(int i = 0; i < m_config.nombre_frames; ++i){
@@ -134,7 +135,7 @@ int* get_adr(MEMOIRE_CONFIG m_config){
 }
 
 /*******************AFFICHAGE DES ADRESSES***************************/
-void affiche_adresse(int* adresse){
+void print_adresse(int* adresse){
 
 	for (int i = 0; i < 10; ++i){
 		printf("Adresse physique : %d / ", i);
@@ -142,95 +143,97 @@ void affiche_adresse(int* adresse){
 	}
 }
 
-/****************CREATION DES THREADS****************/
+/****************FONCTION SUR LES THREADS****************/
 //PERE
 void create_threads(MEMOIRE_CONFIG m_config){
 	pthread_t tid[m_config.nombre_threads];
-	barriere_t bar[m_config.nombre_threads];
-	pthread_mutex_t mut = PTHREAD_MUTEX_INITIALIZER;
-	pthread_cond_t cnd = PTHREAD_COND_INITIALIZER;
-	int compt;
-	int fd;
-	char * nameTube= "/tmp/tube";
 
-	create_tube(nameTube);
-	fd = open(nameTube, O_RDWR);
-	close(fd);
-	unlink(nameTube);
+	mkfifo("/tmp/tube1", 0666);
+	mkfifo("/tmp/tube2", 0666);
 
-	//CREATION THREADS
-	compt = m_config.nombre_threads;
+	int num_receive = 0;
+	
 	printf("(TEST)Sortie thread fils :\n");
-	for (int i = 0; i < m_config.nombre_threads; ++i)
-	{
-		bar[i].compt = &compt;
-		bar[i].mutex = &mut;
-		bar[i].cond = &cnd;
-		pthread_create(tid + i, NULL, thread_fils, bar + i);
-	}
+	for(int i = 0; i < m_config.nombre_threads; ++i){
+		pthread_create(tid + i , NULL, thread_fils, NULL );
 
-	for (int i = 0; i < m_config.nombre_threads; ++i){
+		num_receive = lecture_tube("/tmp/tube1");
+		printf("num_receive = %d\n", num_receive);
+
+		ecriture_tube("/tmp/tube2", num_receive + i);
+	}
+	for(int i = 0; i < m_config.nombre_threads; ++i){
 		pthread_join(tid[i], NULL);
 	}
+
 	printf("\n");
+	
+	unlink("/tmp/tube1");
+	unlink("/tmp/tube2");
+
+	//ouvre tube 1 en tant que thread fils, ecrit dans tube1, ferme tube1
+	//ouvre tube 1 en tant que thread pere, lit dans tube1, ferme tube1
+	//ouvre tube2  en tant que thread pere, ecrit dans tube2, ferme tube2
+	//ouvre tube2 en tant que thread fils, lit dans tube2, ferme tube2
 
 }
 
 //FILS
 void * thread_fils(void * arg){
-	barriere_t *bar = (barriere_t *)arg;
+	int num_send = 5;
+	int num_receive = 0;
+	printf("  > creation du tid du thread : %ld\n", pthread_self());
+	for(int i = 0; i < 100; ++i);
+	ecriture_tube("/tmp/tube1", num_send);
 
-	pthread_mutex_lock(bar->mutex);
-	printf("  >> Entrer barriere\n");
-	(*bar->compt)--;
-	if(*bar->compt != 0){
-		pthread_cond_wait(bar->cond, bar->mutex);
-	}
-	else{
-		pthread_cond_broadcast(bar->cond);
-	}
-	printf("  << Sortie barriere\n");
-	pthread_mutex_unlock(bar->mutex);
+	num_receive = lecture_tube("/tmp/tube2");
+	printf("num_receive = %d\n", num_receive);
+	printf("  < suppression du tid du thread : %ld\n", pthread_self());
+
 
 	return NULL;
 }
 		
-/****************FONCTIONS SUR LES TUBES****************/
-//CHECK SI CHEMIN EXISTE
-int check_tube(char* path){
+/****************FONCTION SUR LES TUBES****************/
+int lecture_tube(char* nom_tube){
+	int num_receive = 0;
+	int fd;
+	if((fd = open(nom_tube, O_RDONLY)) == -1){
+		perror("open_pere() ");
+		exit(0);
+	}
+	if(read(fd, &num_receive, sizeof(num_receive)) == -1){
+		perror("open_fils() ");
+		exit(0);
+	}
+	close(fd);
 
-	struct stat s;
-    if(stat(path, &s) == 0) return 1;
-    return 0;
+	return num_receive;
+
 }
 
-//CREATION
-void create_tube(char* path){
-
-	if(!check_tube(path)){
-		if(mkfifo(path, 0666) < 0){
-			perror("mkfifo() ");
-			exit(-1);
-		}
+void ecriture_tube(char* nom_tube, int num_send){
+	int fd;
+	if((fd = open(nom_tube, O_WRONLY)) == -1){
+		perror("open() ");
+		exit(0);
 	}
+	
+	if(write(fd, &num_send, sizeof(int)) == -1){
+		printf("write() : %s\n", strerror(errno));
+		exit(0);
+	}
+	close(fd);
+
 }
 
-//LECTURE
-void read_tube(void* message, int fd){
+/**********************LRU********************/
 
-	if(read(fd, message, strlen(message)) < 0){
-		perror("read() ");
-		exit(-1);
-	}
-}
+int LRU(){
+	int lastArrived = 0;
 
-//ECRITURE
-void write_tube(void* message, int fd){
 
-	if(write(fd, message, strlen(message)) < 0){
-		perror("write() ");
-		exit(-1);
-	}
+	return lastArrived;
 }
 
 
@@ -242,15 +245,13 @@ void free_type(TYPE_MEMOIRE type){
 
 /************PROGRAMME PRINCIPALE***************/
 int main(void){
-	int* adresse = malloc(sizeof(int) * 10);
+	int* adresse = malloc(sizeof(int));
 
 	MEMOIRE_CONFIG m_config= _init_cfg("config.cfg");
 	TYPE_MEMOIRE type = _init_type_(m_config);
-	affiche_memConfig(m_config);
+	print_memConfig(m_config);
 	adresse = get_adr(m_config);
-	//affiche_adresse(adresse);
 	create_threads(m_config);
-	//affiche_type(type, m_config);
 	free_type(type);
 	free(adresse);
 	
